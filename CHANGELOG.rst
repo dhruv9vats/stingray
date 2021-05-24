@@ -5,9 +5,11 @@ Unreleased (2021-01-18)
 -----------------------
 
 - Lots of performance improvements
+- Faster simulations
+- Averaged Power spectra and Cross spectra now handle Gaussian light curves correctly
 - Fixes in rebin functions
 - New statistical functions for signal detection in power spectra and pulsar search periodograms
-- Improved event and light curve data loading from X-ray satellites (XMM, NICER, NuSTAR, XTE)
+- Much improved FTOOL-compatible mission support
 - New implementation of the FFTFIT method to calculate pulsar times of arrival
 - H-test for pulsar searches
 - Z^2_n search adapted to binned and normally distribute pulse profiles
@@ -15,6 +17,7 @@ Unreleased (2021-01-18)
 - Rebinning function now accepts unevenly sampled data
 - New saving and loading from/to Astropy Tables and Timeseries
 - Improved I/O to ascii, hdf5 and other formats
+- Rehaul of documentation
 
 `Full list of changes`__
 

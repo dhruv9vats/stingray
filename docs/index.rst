@@ -18,7 +18,11 @@ This software provides an easily accessible scripting interface (possibly a GUI)
 Stingray's ultimate goal is to provide the community with a package that eases the learning curve for advanced spectral-timing techniques, with a correct statistical framework.
 
 Further spectral-timing functionality, in particularly command line scripts based on the API defined within Stingray, is available in the package `HENDRICS <https://github.com/StingraySoftware/HENDRICS>`_.
-A Graphical User Interface is under development as part of the project `DAVE <https://github.com/StingraySoftware/dave>`_.
+A graphical user interface is under development as part of the project `DAVE <https://github.com/StingraySoftware/dave>`_.
+
+.. important::
+
+   If you use Stingray for work presented in a publication or talk, please help the project by providing a proper :doc:`citation <citing>`.
 
 Contents
 ========
@@ -26,16 +30,16 @@ Contents
 .. toctree::
    :maxdepth: 2
 
-   scope
-   basics
+   intro
    install
    core
+   quicklook
    modeling
    simulator
    pulsar
+   deadtime
    api
    history
-   help
    contributing
    citing
    acknowledgements

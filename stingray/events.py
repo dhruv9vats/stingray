@@ -69,6 +69,19 @@ class EventList(object):
     header : str
         The full header of the original FITS file, if relevant
 
+    detector_id : iterable
+        The detector that recorded each photon (if the instrument has more than
+        one, e.g. XMM/EPIC-pn)
+
+    timeref : str
+        The time reference, as recorded in the FITS file (e.g. SOLARSYSTEM)
+
+    timesys : str
+        The time system, as recorded in the FITS file (e.g. TDB)
+
+    ephem : str
+        The JPL ephemeris used to barycenter the data, if any (e.g. DE430)
+
     **other_kw :
         Used internally. Any other keyword arguments will be ignored
 
@@ -116,6 +129,7 @@ class EventList(object):
     def __init__(self, time=None, energy=None, ncounts=None, mjdref=0, dt=0,
                  notes="", gti=None, pi=None, high_precision=False,
                  mission=None, instr=None, header=None, detector_id=None,
+                 ephem=None, timeref=None, timesys=None,
                  **other_kw):
 
         self.energy = None if energy is None else np.asarray(energy)
@@ -129,6 +143,9 @@ class EventList(object):
         self.instr = instr
         self.detector_id = detector_id
         self.header = header
+        self.ephem = ephem
+        self.timeref = timeref
+        self.timesys = timesys
 
         if other_kw != {}:
             warnings.warn(f"Unrecognized keywords: {list(other_kw.keys())}")
@@ -229,9 +246,10 @@ class EventList(object):
         return EventList(time=times, gti=lc.gti)
 
     def simulate_times(self, lc, use_spline=False, bin_time=None):
-        """
-        Randomly assign (simulate) photon arrival times to an :class:`EventList` from a
-        :class:`stingray.Lightcurve` object, using the acceptance-rejection method.
+        """Simulate times from an input light curve.
+
+        Randomly simulate photon arrival times to an :class:`EventList` from a
+        :class:`stingray.Lightcurve` object, using the inverse CDF method.
 
         Parameters
         ----------
@@ -242,9 +260,8 @@ class EventList(object):
         use_spline : bool
             Approximate the light curve with a spline to avoid binning effects
 
-        bin_time : float
-            The bin time of the light curve, if it needs to be specified for
-            improved precision
+        bin_time : float default None
+            Ignored and deprecated, maintained for backwards compatibility.
 
         Returns
         -------
@@ -252,9 +269,11 @@ class EventList(object):
             Simulated photon arrival times
         """
         from stingray.simulator.base import simulate_times
+        if bin_time is not None:
+            warnings.warn("Bin time will be ignored in simulate_times",
+                          DeprecationWarning)
 
-        self.time = simulate_times(lc, use_spline=use_spline,
-                                   bin_time=bin_time)
+        self.time = simulate_times(lc, use_spline=use_spline)
         self.gti = lc.gti
         self.ncounts = len(self.time)
 
@@ -396,14 +415,19 @@ class EventList(object):
             else:
                 ev_new.gti = cross_gtis([self.gti, other.gti])
 
+        for attr in ['mission', 'instr']:
+            if getattr(self, attr) != getattr(other, attr):
+                setattr(ev_new, attr, getattr(self, attr) + ',' + getattr(other, attr))
+            else:
+                setattr(ev_new, attr, getattr(self, attr))
+
         ev_new.mjdref = self.mjdref
 
         return ev_new
 
     @staticmethod
     def read(filename, format_="pickle", **kwargs):
-        """
-        Read a :class:`Lightcurve` object from file.
+        r"""Read a :class:`Lightcurve` object from file.
 
         Currently supported formats are
 
@@ -441,15 +465,24 @@ class EventList(object):
 
         if format_ in ('hea'):
             evtdata = load_events_and_gtis(filename, **kwargs)
-            return EventList(time=evtdata.ev_list,
-                             gti=evtdata.gti_list,
-                             pi=evtdata.pi_list,
-                             energy=evtdata.energy_list,
-                             mjdref=evtdata.mjdref,
-                             instr=evtdata.instr,
-                             mission=evtdata.mission,
-                             header=evtdata.header,
-                             detector_id=evtdata.detector_id)
+
+            evt = EventList(time=evtdata.ev_list,
+                            gti=evtdata.gti_list,
+                            pi=evtdata.pi_list,
+                            energy=evtdata.energy_list,
+                            mjdref=evtdata.mjdref,
+                            instr=evtdata.instr,
+                            mission=evtdata.mission,
+                            header=evtdata.header,
+                            detector_id=evtdata.detector_id,
+                            ephem=evtdata.ephem,
+                            timeref=evtdata.timeref,
+                            timesys=evtdata.timesys)
+            if 'additional_columns' in kwargs:
+                for key in evtdata.additional_data:
+                    if not hasattr(evt, key.lower()):
+                        setattr(evt, key.lower(), evtdata.additional_data[key])
+            return evt
 
         if format_ == 'ascii':
             format_ = 'ascii.ecsv'
@@ -492,12 +525,26 @@ class EventList(object):
             ts.write(filename, format=format_, overwrite=True)
 
     def apply_mask(self, mask, inplace=False):
+        """Apply mask to all same-length list-like event attributes.
+
+        Examples
+        --------
+        >>> evt = EventList(time=[0, 1, 2])
+        >>> newev0 = evt.apply_mask([True, True, False], inplace=False);
+        >>> newev1 = evt.apply_mask([True, True, False], inplace=True);
+        >>> np.allclose(newev0.time, [0, 1])
+        True
+        >>> np.allclose(newev1.time, [0, 1])
+        True
+        >>> evt is newev1
+        True
+        """
         if inplace:
             new_ev = self
         else:
             new_ev = copy.deepcopy(self)
-        for attr in 'time', 'energy', 'pi':
-            if hasattr(new_ev, attr):
+        for attr in 'time', 'energy', 'pi', 'cal_pi':
+            if hasattr(new_ev, attr) and getattr(new_ev, attr) is not None:
                 setattr(new_ev, attr, getattr(new_ev, attr)[mask])
         return new_ev
 
