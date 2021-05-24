@@ -49,7 +49,7 @@ class Lightcurve(object):
     err: iterable, optional, default ``None``
         A list or array of the uncertainties in each bin corresponding to
         the bins defined in ``time`` (note: use ``input_counts=False`` to
-        input the count rage, i.e. counts/second, otherwise use
+        input the count range, i.e. counts/second, otherwise use
         counts/bin). If ``None``, we assume the data is poisson distributed
         and calculate the error from the average of the lower and upper
         1-sigma confidence intervals for the Poissonian distribution with

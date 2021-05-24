@@ -232,6 +232,7 @@ class Multitaper(Crossspectrum):
         self._multitaper_periodogram(data, NW=NW, adaptive=adaptive,
                                      bandwidth=bandwidth, jackknife=jackknife,
                                      low_bias=low_bias, Fs=Fs)
+
         self.power = self._normalize_crossspectrum(self.unnorm_power, data.tseg)
 
     def _multitaper_periodogram(self, lc, NW=None, bandwidth=None, adaptive=False,
@@ -245,13 +246,19 @@ class Multitaper(Crossspectrum):
 
         # 'nitime' Multitaper psd seems to be 'abs' normalized by default
         # Converting it to unnormalized using inverse of method used in Crossspectrum
-        log_nphots = np.log(self.nphots)
-        actual_nphots = np.float64(np.sqrt(np.exp(log_nphots + log_nphots)))
-        meanrate = np.sqrt(self.nphots * self.nphots) / lc.tseg
-        self.unnorm_power = abs_norm_mtp * actual_nphots / (2 * meanrate)
+        if self.err_dist == 'poisson':
+            log_nphots = np.log(self.nphots)
+            actual_nphots = np.float64(np.sqrt(np.exp(log_nphots + log_nphots)))
+            meanrate = np.sqrt(self.nphots * self.nphots) / lc.tseg
+            self.unnorm_power = abs_norm_mtp * actual_nphots / (2 * meanrate)
+
+        else:
+            common_factor = 2 * self.dt / self.n
+            self.unnorm_power = abs_norm_mtp / common_factor
 
         len_correct = abs(len(abs_norm_mtp)-len(self.freq))
-        self.unnorm_power = self.unnorm_power[len_correct:]  # Making length same as self.freq
+        # Making length same as self.freq
+        self.unnorm_power = self.unnorm_power[len_correct:]
 
     def rebin(self, df=None, f=None, method="mean"):
         """
