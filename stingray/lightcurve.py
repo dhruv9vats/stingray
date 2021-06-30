@@ -163,6 +163,7 @@ class Lightcurve(object):
         The full header of the original FITS file, if relevant
 
     """
+
     def __init__(self, time, counts, err=None, input_counts=True,
                  gti=None, err_dist='poisson', mjdref=0, dt=None,
                  skip_checks=False, low_memory=False, mission=None,
@@ -238,6 +239,7 @@ class Lightcurve(object):
         self.mission = mission
         self.instr = instr
         self.header = header
+        self.uneven = False
 
         self.input_counts = input_counts
         self.low_memory = low_memory
@@ -452,16 +454,16 @@ class Lightcurve(object):
         check_gtis(self.gti)
 
         idxs = np.searchsorted(self.time, self.gti)
-        uneven = False
+        self.uneven = False
         for idx in range(idxs.shape[0]):
             istart, istop = idxs[idx, 0], min(idxs[idx, 1], self.time.size - 1)
 
             local_diff = np.diff(self.time[istart:istop])
             if np.any(~np.isclose(local_diff, self.dt)):
-                uneven = True
+                self.uneven = True
 
                 break
-        if uneven:
+        if self.uneven:
             simon("Bin sizes in input time array aren't equal throughout! "
                   "This could cause problems with Fourier transforms. "
                   "Please make the input time evenly sampled.")
@@ -788,7 +790,6 @@ class Lightcurve(object):
     @staticmethod
     def make_lightcurve(toa, dt, tseg=None, tstart=None, gti=None, mjdref=0,
                         use_hist=False):
-
         """
         Make a light curve out of photon arrival times, with a given time resolution ``dt``.
         Note that ``dt`` should be larger than the native time resolution of the instrument
@@ -1622,7 +1623,7 @@ class Lightcurve(object):
             plt.show(block=False)
 
     def write(self, filename, format_='pickle', **kwargs):
-        """
+        r"""
         Write a :class:`Lightcurve` object to file. Currently supported formats are
 
         * pickle (not recommended for long-term storage)
@@ -1655,7 +1656,7 @@ class Lightcurve(object):
     @staticmethod
     def read(filename, format_='pickle', err_dist='gauss',
              skip_checks=False):
-        """
+        r"""
         Read a :class:`Lightcurve` object from file.
 
         Currently supported formats are
@@ -1712,7 +1713,6 @@ class Lightcurve(object):
         ts = Table.read(filename, format=format_)
         return Lightcurve.from_astropy_table(
             ts, err_dist=err_dist, skip_checks=skip_checks)
-
 
     def split_by_gti(self, gti=None, min_points=2):
         """

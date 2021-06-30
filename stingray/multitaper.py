@@ -1,5 +1,7 @@
 import copy
 
+from scipy.signal.spectral import lombscargle
+
 from stingray.gti import check_gtis, cross_two_gtis
 from stingray.crossspectrum import Crossspectrum, normalize_crossspectrum
 from stingray.crossspectrum import normalize_crossspectrum_gauss
@@ -10,7 +12,7 @@ import numpy as np
 import scipy
 import scipy.optimize
 import scipy.stats
-from scipy import signal
+from scipy import signal, interpolate, fft
 
 from .events import EventList
 from .lightcurve import Lightcurve
@@ -120,7 +122,8 @@ class Multitaper(Powerspectrum):
     """
 
     def __init__(self, data=None, norm="frac", gti=None, dt=None, lc=None,
-                 NW=4, adaptive=False, jackknife=True, low_bias=True):
+                 NW=4, adaptive=False, jackknife=True, low_bias=True,
+                 lombscargle=False):
 
         if lc is not None:
             warnings.warn("The lc keyword is now deprecated. Use data "
@@ -164,10 +167,12 @@ class Multitaper(Powerspectrum):
         self.fullspec = False
 
         self._make_multitaper_periodogram(lc, NW=NW, adaptive=adaptive,
-                                          jackknife=jackknife, low_bias=low_bias)
+                                          jackknife=jackknife, low_bias=low_bias,
+                                          lombscargle=lombscargle)
 
     def _make_multitaper_periodogram(self, lc, NW=4, adaptive=False,
-                                     jackknife=True, low_bias=True):
+                                     jackknife=True, low_bias=True,
+                                     lombscargle=False):
         """Compute the normalized multitaper spectral estimate.
 
         This includes checking for the presence of and applying Good Time Intervals,
@@ -231,13 +236,25 @@ class Multitaper(Powerspectrum):
         # the number of averaged periodograms in the final output
         # This should *always* be 1 here
         self.m = 1
+        if lc.uneven and lombscargle:
+            self.freq, self.multitaper_norm_power = \
+                self._fourier_multitaper_lomb_scargle(lc, NW=NW,
+                                                      low_bias=low_bias)
 
-        self.freq, self.multitaper_norm_power = \
-            self._fourier_multitaper(lc, NW=NW, adaptive=adaptive,
-                                     jackknife=jackknife, low_bias=low_bias)
+            # Same until the normalizations aren't figured out.
+            self.unnorm_power = self.multitaper_norm_power
+        else:
 
-        # Same for the timebeing until normalization discrepancy is resolved
-        self.unnorm_power = self.multitaper_norm_power * lc.n / lc.dt
+            if lc.uneven:
+                simon("Set the lombscargle keyword to True to use "
+                      "the multitaper lomb-scargle method designed for "
+                      "nonequidistant time intervals")
+
+            self.freq, self.multitaper_norm_power = \
+                self._fourier_multitaper(lc, NW=NW, adaptive=adaptive,
+                                         jackknife=jackknife, low_bias=low_bias)
+
+            self.unnorm_power = self.multitaper_norm_power * lc.n / lc.dt
 
         self.power = \
             self._normalize_multitaper(self.unnorm_power, lc.tseg)
@@ -348,6 +365,107 @@ class Multitaper(Powerspectrum):
                 self.jk_var_deg_freedom = np.full((len(freq_multitaper)), 2 * len(eigvals))
 
         return freq_multitaper, psd_multitaper
+
+    def _fourier_multitaper_lomb_scargle(self, lc, NW=4, low_bias=True):
+        """Compute the multitaper lomb-scargle spectral estimate.
+
+        Use the multitapering concept to calculate the spectral estimate for
+        an unevenly sampled time-series, using the Lomb (1976) - Scargle (1982)
+        periodogram. (Springford et al. 2020)
+
+
+        Parameters
+        ----------
+        lc : :class:`stingray.Lightcurve` objects
+            Two light curves used for computing the cross spectrum.
+
+        NW: float, optional, default ``4``
+            The normalized half-bandwidth of the data tapers, indicating a
+            multiple of the fundamental frequency of the DFT (Fs/N).
+            Common choices are n/2, for n >= 4.
+
+        low_bias: boolean, optional, default ``True``
+            Rather than use 2NW tapers, only use the tapers that have better than
+            90% spectral concentration within the bandwidth (still using
+            a maximum of 2NW tapers)
+
+        Returns
+        -------
+        freq_multitaper: numpy.ndarray
+            The frequency mid-bins of the PSD amplitudes
+
+        psd_multitaper: numpy.ndarray
+            The value of the PSD amplitudes at the given frequency mid-bins
+
+        Notes
+        -----
+        Dose not currently support adapative weighting or jack-knife estimates.
+        """
+
+        if NW < 0.5:
+            raise ValueError("The value of normalized half-bandwidth "
+                             "should be greater than 0.5")
+
+        Kmax = int(2 * NW)
+
+        dpss_tapers, eigvals = \
+            signal.windows.dpss(M=lc.n, NW=NW, Kmax=Kmax,
+                                sym=False, return_ratios=True)
+
+        if low_bias:
+            selected_tapers = (eigvals > 0.9)
+            if not selected_tapers.any():
+                simon("Could not properly use low_bias, "
+                      "keeping the lowest-bias taper")
+                selected_tapers = [np.argmax(eigvals)]
+
+            eigvals = eigvals[selected_tapers]
+            dpss_tapers = dpss_tapers[selected_tapers, :]
+
+        print(f"Using {len(eigvals)} DPSS windows for "
+              "multitaper spectrum estimator")
+
+        dpss_data_interpolated = []
+
+        data_irregular = lc.counts - np.mean(lc.counts)
+        times_regular = np.linspace(
+            lc.times[0], lc.times[-1], lc.times.shape[0])
+
+        for dpss_taper in dpss_tapers:
+            cubic_spline_interp = interpolate.InterpolatedUnivariateSpline(
+                times_regular, dpss_taper, k=3)
+            # interpolating DPSS tapers to IRREGULAR times
+            dpss_interpolated = cubic_spline_interp(lc.times)
+            dpss_interpolated /= np.sum(dpss_interpolated**2)  # Re normalizing
+            # From Springford R implementation
+            dpss_interpolated *= np.sqrt(lc.times.shape[0])
+            dpss_interpolated *= data_irregular
+            dpss_data_interpolated.append(dpss_interpolated)
+
+        psd_multitaper_ls = []
+
+        tseg = (lc.times[-1] - lc.times[0])
+        # freq_mtls = np.arange(0, lc.times.shape[0])*(1/tseg) # This works
+        # freq_mtls = freq_mtls[1:]
+
+        freq_multitaper_ls = fft.rfftfreq(
+            n=lc.times.shape[0], d=tseg/lc.times.shape[0])[1:]  # Avoiding zero
+
+        for values in dpss_data_interpolated:
+
+            psd = signal.lombscargle(lc.times, values,
+                                     2*np.pi*freq_multitaper_ls,
+                                     precenter=True, normalize=False)
+            # Normalized according to aspringf
+            psd *= 0.5 * tseg / lc.times.shape[0]
+            psd_multitaper_ls.append(psd)
+
+        psd_multitaper_ls = np.array(psd_multitaper_ls)
+        psd_multitaper_ls = np.mean(psd_multitaper_ls, axis=-2)
+
+        self.jk_var_deg_freedom = None
+
+        return freq_multitaper_ls, psd_multitaper_ls
 
     def psd_from_freq_response(self, freq_response, weights):
         """Calculate the weighted PSD from the Fourier transformed data.
