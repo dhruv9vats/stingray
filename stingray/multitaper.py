@@ -211,11 +211,14 @@ class Multitaper(Powerspectrum):
 
         check_gtis(self.gti)
 
-        if self.gti.shape[0] != 1:
-            raise TypeError("Non-averaged Spectra need "
-                            "a single Good Time Interval")
+        lc_uneven = lc.uneven
 
-        lc = lc.split_by_gti()[0]
+        # No need for gti's if lombscargle is to be used
+        if not lombscargle:
+            if self.gti.shape[0] != 1:
+                raise TypeError("Non-averaged Spectra need "
+                                "a single Good Time Interval")
+            lc = lc.split_by_gti()[0]
 
         self.meancounts = lc.meancounts
         self.nphots = np.float64(np.sum(lc.counts))
@@ -236,7 +239,9 @@ class Multitaper(Powerspectrum):
         # the number of averaged periodograms in the final output
         # This should *always* be 1 here
         self.m = 1
-        if lc.uneven and lombscargle:
+
+        # Only use lombscargle if explicitly told, otherwise just suggest
+        if lombscargle:
             self.freq, self.multitaper_norm_power = \
                 self._fourier_multitaper_lomb_scargle(lc, NW=NW,
                                                       low_bias=low_bias)
@@ -245,10 +250,9 @@ class Multitaper(Powerspectrum):
             self.unnorm_power = self.multitaper_norm_power
         else:
 
-            if lc.uneven:
-                simon("Set the lombscargle keyword to True to use "
-                      "the multitaper lomb-scargle method designed for "
-                      "nonequidistant time intervals")
+            if lc_uneven:
+                simon("Consider using the multitaper lomb-scargle method"
+                      " designed for nonequidistant time intervals")
 
             self.freq, self.multitaper_norm_power = \
                 self._fourier_multitaper(lc, NW=NW, adaptive=adaptive,
@@ -429,35 +433,35 @@ class Multitaper(Powerspectrum):
 
         data_irregular = lc.counts - np.mean(lc.counts)
         times_regular = np.linspace(
-            lc.times[0], lc.times[-1], lc.times.shape[0])
+            lc.time[0], lc.time[-1], lc.time.shape[0])
 
         for dpss_taper in dpss_tapers:
             cubic_spline_interp = interpolate.InterpolatedUnivariateSpline(
                 times_regular, dpss_taper, k=3)
             # interpolating DPSS tapers to IRREGULAR times
-            dpss_interpolated = cubic_spline_interp(lc.times)
+            dpss_interpolated = cubic_spline_interp(lc.time)
             dpss_interpolated /= np.sum(dpss_interpolated**2)  # Re normalizing
             # From Springford R implementation
-            dpss_interpolated *= np.sqrt(lc.times.shape[0])
+            dpss_interpolated *= np.sqrt(lc.time.shape[0])
             dpss_interpolated *= data_irregular
             dpss_data_interpolated.append(dpss_interpolated)
 
         psd_multitaper_ls = []
 
-        tseg = (lc.times[-1] - lc.times[0])
+        tseg = (lc.time[-1] - lc.time[0])
         # freq_mtls = np.arange(0, lc.times.shape[0])*(1/tseg) # This works
         # freq_mtls = freq_mtls[1:]
 
         freq_multitaper_ls = fft.rfftfreq(
-            n=lc.times.shape[0], d=tseg/lc.times.shape[0])[1:]  # Avoiding zero
+            n=lc.time.shape[0], d=tseg/lc.time.shape[0])[1:]  # Avoiding zero
 
         for values in dpss_data_interpolated:
 
-            psd = signal.lombscargle(lc.times, values,
+            psd = signal.lombscargle(lc.time, values,
                                      2*np.pi*freq_multitaper_ls,
                                      precenter=True, normalize=False)
             # Normalized according to aspringf
-            psd *= 0.5 * tseg / lc.times.shape[0]
+            psd *= 0.5 * tseg / lc.time.shape[0]
             psd_multitaper_ls.append(psd)
 
         psd_multitaper_ls = np.array(psd_multitaper_ls)
